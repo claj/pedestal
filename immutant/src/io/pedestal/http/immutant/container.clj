@@ -59,7 +59,7 @@
                                   (async/close! resume-chan)
                                   (.complete ac)))
                               (onError [this throwable]
-                                (async/put! resume-chan (assoc context :io.pedestal.impl.interceptor/error throwable))
+                                (async/put! resume-chan (assoc context :io.pedestal.interceptor.chain/error throwable))
                                 (async/close! resume-chan))))))
   (write-byte-buffer-body [servlet-response ^ByteBuffer body resume-chan context]
     (let [;; Unlike Jetty, Undertow needs to toggle into Async mode to send the NIO payloads
@@ -74,5 +74,5 @@
                                   (async/close! resume-chan)
                                   (.complete ac)))
                               (onError [this throwable]
-                                (async/put! resume-chan (assoc context :io.pedestal.impl.interceptor/error throwable))
+                                (async/put! resume-chan (assoc context :io.pedestal.interceptor.chain/error throwable))
                                 (async/close! resume-chan)))))))

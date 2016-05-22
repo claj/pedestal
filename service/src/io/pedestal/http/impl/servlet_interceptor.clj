@@ -26,7 +26,9 @@
             [io.pedestal.http.request.map :as request-map]
             [io.pedestal.http.request.zerocopy :as request-zerocopy]
             [ring.util.response :as ring-response])
-  (:import (javax.servlet Servlet ServletRequest ServletConfig)
+  (:import (javax.servlet Servlet ServletRequest ServletConfig
+                          AsyncContext
+                          ServletOutputStream WriteListener)
            (javax.servlet.http HttpServletRequest HttpServletResponse)
            (java.io OutputStreamWriter OutputStream EOFException)
            (java.nio.channels ReadableByteChannel)
@@ -94,29 +96,41 @@
 (defprotocol WriteableBodyAsync
   (write-body-async [body servlet-response resume-chan context]))
 
+(declare start-servlet-async)
 (extend-protocol WriteableBodyAsync
 
   clojure.core.async.impl.protocols.Channel
   (write-body-async [body servlet-response resume-chan context]
-    (async/go
-      (loop []
-        (when-let [body-part (async/<! body)]
-          (try
-            (write-body servlet-response body-part)
-            (.flushBuffer ^HttpServletResponse servlet-response)
-            (catch EOFException e
-              (log/warn :msg "The pipe closed while async writing to the client; Client most likely disconnected."
-                        :exception e
-                        :src-chan body))
-            (catch Throwable t
-              (log/meter ::async-write-errors)
-              (log/error :msg "An error occured when async writing to the client"
-                         :throwable t
-                         :src-chan body)
-              (async/close! body)))
-          (recur)))
-      (async/>! resume-chan context)
-      (async/close! resume-chan)))
+    (let [os ^ServletOutputStream (.getOutputStream servlet-response)
+          ac ^AsyncContext (start-servlet-async context)]
+      (.setWriteListener os
+                         (reify javax.servlet.WriteListener
+                           (onWritePossible [this]
+                             (loop []
+                               (let [body-part (async/take! body)
+                                     ready? (.isReady os)]
+                                 (when (and ready? body-part)
+                                   (try
+                                     (write-body-to-stream body-part os)
+                                     (.flushBuffer ^HttpServletResponse servlet-response)
+                                     (catch EOFException e
+                                       (log/warn :msg "The pipe closed while async writing to the client; Client most likely disconnected."
+                                                 :exception e
+                                                 :src-chan body)
+                                       (async/close! body))
+                                     (catch Throwable t
+                                       (log/meter ::async-write-errors)
+                                       (log/error :msg "An error occured when async writing to the client"
+                                                  :throwable t
+                                                  :src-chan body)
+                                       (async/close! body)))
+                                   (recur))))
+                             (async/offer! resume-chan context)
+                             (async/close! resume-chan)
+                             (.complete ac))
+                           (onError [this throwable]
+                             (async/offer! resume-chan (assoc context ::interceptor.chain/error throwable))
+                             (async/close! resume-chan))))))
 
   java.nio.channels.ReadableByteChannel
   (write-body-async [body servlet-response resume-chan context]
@@ -183,8 +197,9 @@
 
 (defn- start-servlet-async
   [{:keys [servlet-request async?] :as context}]
-  (when-not (async? context)
-    (start-servlet-async* servlet-request)))
+  (if-not (async? context)
+    (start-servlet-async* servlet-request)
+    (.getAsyncContext servlet-request)))
 
 (defn- enter-stylobate
   [{:keys [servlet servlet-request servlet-response] :as context}]
