@@ -100,10 +100,11 @@
 (extend-protocol WriteableBodyAsync
 
   clojure.core.async.impl.protocols.Channel
-  (write-body-async [body servlet-response resume-chan context]
+  (write-body-async [body ^HttpServletResponse servlet-response resume-chan context]
     (let [os ^ServletOutputStream (.getOutputStream servlet-response)
           ac ^AsyncContext (start-servlet-async context)]
       (.setWriteListener os
+                         ;; TODO: This is a bit of a mess - the logic needs to be cleaned up
                          (reify javax.servlet.WriteListener
                            (onWritePossible [this]
                              (loop []
@@ -112,7 +113,7 @@
                                  (when (and ready? body-part)
                                    (try
                                      (write-body-to-stream body-part os)
-                                     (.flushBuffer ^HttpServletResponse servlet-response)
+                                     (.flushBuffer servlet-response)
                                      (catch EOFException e
                                        (log/warn :msg "The pipe closed while async writing to the client; Client most likely disconnected."
                                                  :exception e
@@ -123,9 +124,9 @@
                                        (log/error :msg "An error occured when async writing to the client"
                                                   :throwable t
                                                   :src-chan body)
-                                       (async/close! body)))
-                                   (when-not (clojure.core.async.impl.protocols/closed? body)
-                                     (recur)))))
+                                       (async/close! body))))
+                                 (when-not (clojure.core.async.impl.protocols/closed? body)
+                                   (recur))))
                              (async/put! resume-chan context)
                              (async/close! resume-chan)
                              (.complete ac))
