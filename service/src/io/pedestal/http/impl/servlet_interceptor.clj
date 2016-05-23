@@ -107,7 +107,7 @@
                          (reify javax.servlet.WriteListener
                            (onWritePossible [this]
                              (loop []
-                               (let [body-part (async/take! body)
+                               (let [body-part (async/poll! body)
                                      ready? (.isReady os)]
                                  (when (and ready? body-part)
                                    (try
@@ -124,12 +124,13 @@
                                                   :throwable t
                                                   :src-chan body)
                                        (async/close! body)))
-                                   (recur))))
-                             (async/offer! resume-chan context)
+                                   (when-not (clojure.core.async.impl.protocols/closed? body)
+                                     (recur)))))
+                             (async/put! resume-chan context)
                              (async/close! resume-chan)
                              (.complete ac))
                            (onError [this throwable]
-                             (async/offer! resume-chan (assoc context ::interceptor.chain/error throwable))
+                             (async/put! resume-chan (assoc context ::interceptor.chain/error throwable))
                              (async/close! resume-chan))))))
 
   java.nio.channels.ReadableByteChannel

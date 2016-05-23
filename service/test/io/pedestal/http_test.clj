@@ -52,6 +52,14 @@
      :headers {"Content-Type" "text/plain"}
      :body    (.source p)}))
 
+(defn hello-core-async-channel-page [request]
+  (let [c (async/chan)]
+    (async/go
+      (async/>! c "HELLO"))
+    {:status 200
+     :headers {"Content-Type" "text/plain"}
+     :body c}))
+
 (defn hello-plaintext-no-content-type-page [request]
   (hello-page request))
 
@@ -86,6 +94,7 @@
     ["/token" {:get hello-token-page}]
     ["/bytebuffer" {:get hello-byte-buffer-page}]
     ["/bytechannel" {:get hello-byte-channel-page}]
+    ["/asyncchannel" {:get hello-core-async-channel-page}]
     ["/edn" {:get get-edn}]
     ["/just-status" {:get just-status-page}]
     ["/with-binding" {:get [^:interceptors [add-binding] with-binding-page]}]
@@ -142,6 +151,12 @@
 (deftest plaintext-from-byte-channel
   "Response bodies that are ReadableByteChannels toggle async behavior in supported containers"
   (let [response (response-for app :get "/bytechannel")]
+    (is (= "text/plain" (get-in response [:headers "Content-Type"])))
+    (is (= "HELLO" (:body response)))))
+
+(deftest plaintext-from-coreasync-channel
+  "Response bodies that are core.async Channels toggle async behavior in Servlet 3.1 containers"
+  (let [response (response-for app :get "/asyncchannel")]
     (is (= "text/plain" (get-in response [:headers "Content-Type"])))
     (is (= "HELLO" (:body response)))))
 

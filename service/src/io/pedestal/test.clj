@@ -149,6 +149,16 @@
                  (.write output-stream (int arg))
                  (.write output-stream (bytes arg))))
         ([contents off len] (.write output-stream (bytes contents) (int off) (int len))))
+      (print [x]
+        (.write output-stream (bytes x))
+        (.flush output-stream))
+      (println [x]
+        (.write output-stream (bytes x))
+        (.write output-stream (.getBytes "\n" "UTF-8"))
+        (.flush output-stream))
+      (setWriteListener [listener]
+        (.onWritePossible listener))
+      (isReady [] true)
       (meta [] {:output-stream output-stream}))))
 
 (defn ^HttpServletResponse test-servlet-response
