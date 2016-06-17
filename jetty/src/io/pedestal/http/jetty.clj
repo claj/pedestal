@@ -92,8 +92,8 @@
                          (into-array ConnectionFactory
                                      (remove nil?
                                              (into [(SslConnectionFactory.
-                                                      (ssl-context-factory container-options)
-                                                      (.getProtocol ^ALPNServerConnectionFactory alpn))]
+                                                     (ssl-context-factory container-options)
+                                                     (.getProtocol ^ALPNServerConnectionFactory alpn))]
                                                    connection-factories))))
          connector (if ssl-factories
                      (ServerConnector. server ssl-factories)
@@ -146,33 +146,42 @@
                reuse-addr? true}} :container-options} options
         thread-pool (QueuedThreadPool. ^Integer max-threads)
         server (Server. thread-pool)
+        
         _ (when (and h2? (not ssl-port))
             (throw (IllegalArgumentException. "SSL must be enabled to use HTTP/2. Please set an ssl port and appropriate *store setups")))
+        
+        _ (when (and (nil? port) (not (or ssl? ssl-port h2?)))
+            (throw (IllegalArgumentException. "HTTP port is nil and no SSL config is supplied. Please either set a clear text HTTP port, or configure SSL")))
+        
+        _ (when (and (nil? port) (true? h2c))
+            (throw (IllegalArgumentException. "HTTP port is nil while h2c? is enabled. Please either set a clear text HTTP port, or disable h2c?")))
+        
         http-conf (http-configuration (:container-options options))
         http (HttpConnectionFactory. http-conf)
         http2c (when h2c? (HTTP2CServerConnectionFactory. http-conf))
         http2 (when h2? (HTTP2ServerConnectionFactory. http-conf))
         alpn (when h2?
-               ;(set! (. ALPN debug) true)
+               ;;(set! (. ALPN debug) true)
                (NegotiatingServerConnectionFactory/checkProtocolNegotiationAvailable)
                (doto (ALPNServerConnectionFactory. "h2,h2-17,h2-14,http/1.1")
                  (.setDefaultProtocol "http/1.1")))
         ssl (when (or ssl? ssl-port h2?)
               (ssl-conn-factory (assoc options :alpn alpn)))
-        http-connector (doto (ServerConnector. server (into-array ConnectionFactory
-                                                                  (remove nil? [http http2c])))
-                         (.setReuseAddress reuse-addr?)
-                         (.setPort port)
-                         (.setHost host))
+        http-connector (when port
+                         (doto (ServerConnector. server (into-array ConnectionFactory
+                                                                    (remove nil? [http http2c])))
+                           (.setReuseAddress reuse-addr?)
+                           (.setPort port)
+                           (.setHost host)))
         ssl-connector (when ssl
                         (doto (ServerConnector. server
                                                 (into-array ConnectionFactory
                                                             (remove nil?
                                                                     (into [ssl alpn http2 (HttpConnectionFactory. http-conf)]
                                                                           (map (fn [ffn] (ffn options http-conf)) connection-factory-fns)))))
-                         (.setReuseAddress reuse-addr?)
-                         (.setPort ssl-port)
-                         (.setHost host)))
+                          (.setReuseAddress reuse-addr?)
+                          (.setPort ssl-port)
+                          (.setHost host)))
         context (doto (ServletContextHandler. server "/")
                   (.addServlet (ServletHolder. ^javax.servlet.Servlet servlet) "/*"))]
     (when daemon?
@@ -199,31 +208,31 @@
 (defn server
   ([service-map] (server service-map {}))
   ([service-map options]
-     (let [server (create-server (:io.pedestal.http/servlet service-map) options)]
-       {:server   server
-        :start-fn #(start server options)
-        :stop-fn  #(stop server)})))
+   (let [server (create-server (:io.pedestal.http/servlet service-map) options)]
+     {:server   server
+      :start-fn #(start server options)
+      :stop-fn  #(stop server)})))
 
 
-  ;; :port         - the port to listen on (defaults to 80)
-  ;; :host         - the hostname to listen on
-  ;; :join?        - blocks the thread until server ends (defaults to true)
+;; :port         - the http/h2c-port to listen on. If nil and ssl config supplied, http is disabled
+;; :host         - the hostname to listen on
+;; :join?        - blocks the thread until server ends (defaults to true)
 
-  ;; :daemon?      - use daemon threads (defaults to false)
-  ;; :max-threads  - the maximum number of threads to use (default 50)
-  ;; :resue-addr?  - reuse the socket address (defaults to true)
-  ;; :configurator - a function called with the Jetty Server instance
-  ;; :context-configurator - a function called with the Jetty ServletContextHandler
-  ;; :ssl?         - allow connections over HTTPS
-  ;; :ssl-port     - the SSL port to listen on (defaults to 443, implies :ssl?)
-  ;; :h2?          - enable http2 protocol on secure socket port
-  ;; :h2c?         - enable http2 clear text on plain socket port
-  ;; :connection-factory-fns - a vector of functions that take the options map and HttpConfiguration
-  ;;                           and return a ConnectionFactory obj (applied to SSL connection)
-  ;; :keystore     - the keystore to use for SSL connections
-  ;; :key-password - the password to the keystore
-  ;; :truststore   - a truststore to use for SSL connections
-  ;; :trust-password - the password to the truststore
-  ;; :client-auth  - SSL client certificate authenticate, may be set to :need,
-  ;;                 :want or :none (defaults to :none)"
+;; :daemon?      - use daemon threads (defaults to false)
+;; :max-threads  - the maximum number of threads to use (default 50)
+;; :resue-addr?  - reuse the socket address (defaults to true)
+;; :configurator - a function called with the Jetty Server instance
+;; :context-configurator - a function called with the Jetty ServletContextHandler
+;; :ssl?         - allow connections over HTTPS
+;; :ssl-port     - the SSL port to listen on (defaults to 443, implies :ssl?)
+;; :h2?          - enable http2 protocol on secure socket port
+;; :h2c?         - enable http2 clear text on plain socket port
+;; :connection-factory-fns - a vector of functions that take the options map and HttpConfiguration
+;;                           and return a ConnectionFactory obj (applied to SSL connection)
+;; :keystore     - the keystore to use for SSL connections
+;; :key-password - the password to the keystore
+;; :truststore   - a truststore to use for SSL connections
+;; :trust-password - the password to the truststore
+;; :client-auth  - SSL client certificate authenticate, may be set to :need,
+;;                 :want or :none (defaults to :none)"
 
